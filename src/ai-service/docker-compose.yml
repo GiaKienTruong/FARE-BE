@@ -1,0 +1,42 @@
+version: '3.8'
+
+services:
+  catvton-ai:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: fare/catvton-service:latest
+    container_name: catvton-service
+    ports:
+      - "7860:7860"
+    volumes:
+      - ./models:/app/models
+      - ./cache:/root/.cache
+    environment:
+      - CUDA_VISIBLE_DEVICES=0
+      - MODEL_NAME=catvton
+      - MAX_BATCH_SIZE=1
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [ gpu ]
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:7860/health" ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+  # Optional: Redis for caching (nếu cần)
+  # redis:
+  #   image: redis:7-alpine
+  #   ports:
+  #     - "6379:6379"
+  #   volumes:
+  #     - redis_data:/data
+
+  # volumes:
+  #   redis_data:
