@@ -1,0 +1,30 @@
+{
+  "info": {
+    "_postman_id": "aa7dc1e8-6c33-4226-80f5-d5a9c358c59f",
+    "name": "New Collection",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "New Request",
+      "id": "d4bd45ad-0675-4063-9040-104d9b51afb4",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "http://localhost:3000/api/auth",
+          "protocol": "http",
+          "host": [
+            "localhost"
+          ],
+          "port": "3000",
+          "path": [
+            "api",
+            "auth"
+          ]
+        }
+      },
+      "response": []
+    }
+  ]
+}

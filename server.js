@@ -33,6 +33,11 @@ app.use('/api/wardrobe', require('./src/routes/wardrobe'));
 app.use('/api/ai', require('./src/routes/ai'));
 app.use('/api/tryon', require('./src/routes/tryon'));
 
+//TEST ROUTES
+if (process.env.NODE_ENV === 'development') {
+    app.use('/api/test', require('./src/routes/test'));
+    console.log('Test route enabled at /api/test');
+}
 // Error handling middleware
 app.use((err, req, res, next) => {
     console.error(err.stack);
