@@ -1,25 +1,80 @@
 // src/services/tryonService.js
-// Service xử lý logic AI virtual try-on
+// Virtual Try-On powered by Fal.ai (production)
 
 const axios = require('axios');
 const pool = require('../config/database');
 
-// URL của AI service container (self-hosted)
-const AI_SERVICE_URL = process.env.AI_SERVICE_URL || 'http://localhost:7860';
+const FAL_KEY = process.env.FAL_KEY;
+
+// Fal.ai endpoint for virtual try-on (IDM-VTON model)
+const FAL_TRYON_URL = 'https://fal.run/fal-ai/idm-vton';
 
 class TryOnService {
     /**
-     * Tạo try-on request mới
-     * @param {number} userId - ID người dùng
-     * @param {string} personImageUrl - URL ảnh người dùng
-     * @param {string} garmentImageUrl - URL ảnh quần áo
-     * @param {number|null} garmentId - ID quần áo trong wardrobe (optional)
-     * @returns {Promise<object>} - Try-on result
+     * Gọi Fal.ai API để generate try-on image
+     */
+    async callFalAI(personImageUrl, garmentImageUrl) {
+        if (!FAL_KEY) {
+            throw new Error('FAL_KEY is not configured. Please set the FAL_KEY environment variable.');
+        }
+
+        console.log('🚀 [Fal.ai] Starting virtual try-on...');
+        console.log('  Person:', personImageUrl);
+        console.log('  Garment:', garmentImageUrl);
+
+        const response = await axios.post(FAL_TRYON_URL, {
+            human_image_url: personImageUrl,
+            garment_image_url: garmentImageUrl,
+            description: 'A stylish outfit',
+            is_checked: true,
+            is_checked_crop: false,
+            denoise_steps: 30,
+            seed: 42,
+        }, {
+            headers: {
+                'Authorization': `Key ${FAL_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            timeout: 120000, // 2 min timeout
+        });
+
+        const resultImageUrl = response.data?.image?.url || response.data?.images?.[0]?.url;
+        if (!resultImageUrl) {
+            throw new Error('Fal.ai did not return an image URL');
+        }
+
+        console.log('✅ [Fal.ai] Try-on completed:', resultImageUrl);
+        return {
+            output_image: resultImageUrl,
+            model_version: 'fal-idm-vton',
+        };
+    }
+
+    /**
+     * Upload image buffer to Cloudinary
+     */
+    async uploadToCloudinary(buffer, folder = 'fare/tryon/results') {
+        const cloudinary = require('../config/cloudinary');
+        return new Promise((resolve, reject) => {
+            const uploadStream = cloudinary.uploader.upload_stream(
+                { folder, resource_type: 'image' },
+                (error, result) => { if (error) reject(error); else resolve(result); }
+            );
+            const { Readable } = require('stream');
+            const readable = new Readable();
+            readable.push(buffer);
+            readable.push(null);
+            readable.pipe(uploadStream);
+        });
+    }
+
+    /**
+     * Main: generate virtual try-on
      */
     async generateTryOn(userId, personImageUrl, garmentImageUrl, garmentId = null) {
         const startTime = Date.now();
 
-        // 1. Tạo record trong database với status 'processing'
+        // 1. Create record in DB with status 'processing'
         const insertResult = await pool.query(
             `INSERT INTO tryon_results 
              (user_id, person_image_url, garment_id, garment_image_url, status) 
@@ -27,87 +82,60 @@ class TryOnService {
              RETURNING id`,
             [userId, personImageUrl, garmentId, garmentImageUrl]
         );
-
         const tryonId = insertResult.rows[0].id;
 
-        try {
-            // 2. Gọi AI service để generate try-on
-            const aiResult = await this.callAIService(personImageUrl, garmentImageUrl);
+        // 2. Run AI in background (non-blocking) so client can start polling
+        (async () => {
+            try {
+                console.log(`[ASYNC] Processing try-on ID: ${tryonId}`);
 
-            const processingTime = Date.now() - startTime;
+                // Call Fal.ai
+                const aiResult = await this.callFalAI(personImageUrl, garmentImageUrl);
+                const processingTime = Date.now() - startTime;
 
-            // 3. Upload result image lên Cloudinary (nếu cần)
-            const resultImageUrl = aiResult.output_image;
-
-            // 4. Update database với kết quả
-            await pool.query(
-                `UPDATE tryon_results 
-                 SET status = 'completed', 
-                     result_image_url = $1, 
-                     processing_time_ms = $2,
-                     model_version = $3
-                 WHERE id = $4`,
-                [resultImageUrl, processingTime, aiResult.model_version || 'catvton-v1', tryonId]
-            );
-
-            return {
-                id: tryonId,
-                status: 'completed',
-                resultImageUrl,
-                processingTimeMs: processingTime
-            };
-
-        } catch (error) {
-            // Xử lý lỗi
-            await pool.query(
-                `UPDATE tryon_results 
-                 SET status = 'failed', error_message = $1 
-                 WHERE id = $2`,
-                [error.message, tryonId]
-            );
-
-            throw error;
-        }
-    }
-
-    /**
-     * Gọi AI service (CatVTON hoặc IDM-VTON)
-     * @param {string} personImageUrl - URL ảnh người
-     * @param {string} garmentImageUrl - URL ảnh quần áo
-     * @returns {Promise<object>} - AI service response
-     */
-    async callAIService(personImageUrl, garmentImageUrl) {
-        try {
-            const response = await axios.post(`${AI_SERVICE_URL}/api/tryon`, {
-                person_image: personImageUrl,
-                garment_image: garmentImageUrl,
-                category: 'full-body',  // User yêu cầu full-body
-                denoise_steps: 30,
-                seed: -1  // Random seed
-            }, {
-                timeout: 60000,  // 60 seconds timeout cho real-time
-                headers: {
-                    'Content-Type': 'application/json'
+                // Download result image and re-upload to Cloudinary for permanence
+                let finalImageUrl = aiResult.output_image;
+                try {
+                    const imgResponse = await axios.get(aiResult.output_image, {
+                        responseType: 'arraybuffer',
+                        timeout: 60000,
+                    });
+                    const uploadResult = await this.uploadToCloudinary(Buffer.from(imgResponse.data));
+                    finalImageUrl = uploadResult.secure_url;
+                    console.log('✅ Saved to Cloudinary:', finalImageUrl);
+                } catch (uploadErr) {
+                    console.warn('⚠️ Cloudinary upload failed, using Fal.ai URL directly:', uploadErr.message);
                 }
-            });
 
-            return response.data;
-        } catch (error) {
-            if (error.code === 'ECONNREFUSED') {
-                throw new Error('AI Service không khả dụng. Vui lòng kiểm tra container đang chạy.');
+                // Update DB with result
+                await pool.query(
+                    `UPDATE tryon_results 
+                     SET status = 'completed', result_image_url = $1, 
+                         processing_time_ms = $2, model_version = $3
+                     WHERE id = $4`,
+                    [finalImageUrl, processingTime, aiResult.model_version, tryonId]
+                );
+                console.log(`[ASYNC] Done! Try-on ${tryonId} completed in ${(processingTime / 1000).toFixed(1)}s`);
+
+            } catch (error) {
+                console.error(`[ASYNC ERROR] Try-on ${tryonId} failed:`, error.message);
+                await pool.query(
+                    `UPDATE tryon_results SET status = 'failed', error_message = $1 WHERE id = $2`,
+                    [error.message, tryonId]
+                );
             }
-            if (error.response) {
-                throw new Error(`AI Service error: ${error.response.data.error || error.response.statusText}`);
-            }
-            throw error;
-        }
+        })();
+
+        // 3. Return immediately so app starts polling
+        return {
+            id: tryonId,
+            status: 'processing',
+            message: 'AI đang xử lý. Thường mất khoảng 10-20 giây.',
+        };
     }
 
     /**
-     * Lấy kết quả try-on theo ID
-     * @param {number} tryonId - ID của try-on
-     * @param {number} userId - ID người dùng (để verify ownership)
-     * @returns {Promise<object|null>}
+     * Get a single try-on result
      */
     async getResult(tryonId, userId) {
         const result = await pool.query(
@@ -118,16 +146,11 @@ class TryOnService {
              WHERE id = $1 AND user_id = $2`,
             [tryonId, userId]
         );
-
         return result.rows[0] || null;
     }
 
     /**
-     * Lấy lịch sử try-on của user
-     * @param {number} userId - ID người dùng
-     * @param {number} limit - Số lượng kết quả
-     * @param {number} offset - Offset cho pagination
-     * @returns {Promise<object[]>}
+     * Get try-on history for a user
      */
     async getHistory(userId, limit = 20, offset = 0) {
         const result = await pool.query(
@@ -139,44 +162,31 @@ class TryOnService {
              LIMIT $2 OFFSET $3`,
             [userId, limit, offset]
         );
-
         return result.rows;
     }
 
     /**
-     * Xóa try-on result
-     * @param {number} tryonId - ID của try-on
-     * @param {number} userId - ID người dùng
-     * @returns {Promise<boolean>}
+     * Delete a try-on result
      */
     async deleteResult(tryonId, userId) {
         const result = await pool.query(
             `DELETE FROM tryon_results WHERE id = $1 AND user_id = $2 RETURNING id`,
             [tryonId, userId]
         );
-
         return result.rowCount > 0;
     }
 
     /**
-     * Kiểm tra trạng thái AI service
-     * @returns {Promise<object>}
+     * Health check
      */
     async checkAIServiceHealth() {
-        try {
-            const response = await axios.get(`${AI_SERVICE_URL}/health`, {
-                timeout: 5000
-            });
-            return {
-                status: 'online',
-                ...response.data
-            };
-        } catch (error) {
-            return {
-                status: 'offline',
-                error: error.message
-            };
-        }
+        return {
+            status: 'online',
+            provider: 'fal.ai',
+            model: 'idm-vton',
+            note: 'FAL.ai-powered. No local model required.',
+            fal_key_configured: !!FAL_KEY,
+        };
     }
 }
 

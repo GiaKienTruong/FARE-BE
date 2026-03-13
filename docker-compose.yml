@@ -63,7 +63,7 @@ services:
       - CLOUDINARY_CLOUD_NAME=${CLOUDINARY_CLOUD_NAME}
       - CLOUDINARY_API_KEY=${CLOUDINARY_API_KEY}
       - CLOUDINARY_API_SECRET=${CLOUDINARY_API_SECRET}
-      - AI_SERVICE_URL=http://catvton-ai:7860
+      - FAL_KEY=${FAL_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -75,29 +75,6 @@ services:
     command: npm run dev
     networks:
       - fare-network
-  # AI Service (CatVTON) - Optional, chỉ chạy nếu có GPU
-  # Uncomment nếu bạn có NVIDIA GPU
-  # catvton-ai:
-  #   build:
-  #     context: ./src/ai-service
-  #     dockerfile: Dockerfile
-  #   container_name: catvton-service
-  #   ports:
-  #     - "7860:7860"
-  #   volumes:
-  #     - ./src/ai-service/models:/app/models
-  #     - ./src/ai-service/cache:/root/.cache
-  #   environment:
-  #     - CUDA_VISIBLE_DEVICES=0
-  #   deploy:
-  #     resources:
-  #       reservations:
-  #         devices:
-  #           - driver: nvidia
-  #             count: 1
-  #             capabilities: [gpu]
-  #   networks:
-  #     - fare-network
 
 volumes:
   postgres_data:
