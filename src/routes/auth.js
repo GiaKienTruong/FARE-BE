@@ -70,6 +70,44 @@ router.post('/register', verifyToken, async (req, res) => {
     }
 });
 
+// POST /api/auth/sync - Sync Social Login user with local database
+router.post('/sync', verifyToken, async (req, res) => {
+    const client = await pool.connect();
+    try {
+        const firebaseUid = req.user.uid;
+        const email = req.user.email;
+        const displayName = req.user.name || email.split('@')[0];
+
+        // 1. Check if user exists
+        let userResult = await client.query(
+            'SELECT id, email, display_name, subscription_tier FROM users WHERE firebase_uid = $1',
+            [firebaseUid]
+        );
+
+        // 2. If not found, create new user automatically (for Social Login)
+        if (userResult.rows.length === 0) {
+            console.log(`[AUTH] Creating new user profile for Social login: ${email}`);
+            userResult = await client.query(
+                `INSERT INTO users (firebase_uid, email, display_name, subscription_tier)
+                 VALUES ($1, $2, $3, 'free')
+                 RETURNING id, email, display_name, subscription_tier`,
+                [firebaseUid, email, displayName]
+            );
+        }
+
+        res.json({
+            message: 'User synced successfully',
+            user: userResult.rows[0]
+        });
+
+    } catch (error) {
+        console.error('Auth sync error:', error);
+        res.status(500).json({ error: 'Failed to sync user profile' });
+    } finally {
+        client.release();
+    }
+});
+
 // GET /api/auth/profile - Get user profile
 router.get('/profile', verifyToken, async (req, res) => {
     const client = await pool.connect();

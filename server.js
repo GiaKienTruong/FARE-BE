@@ -55,11 +55,14 @@ app.use((req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
     console.log(`🚀 FARE Backend running on port ${PORT}`);
     console.log(`📍 Health check: http://localhost:${PORT}/health`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 });
+
+// Set server timeout to 30 minutes for long-running AI tasks
+server.timeout = 1800000;
 
 // Export pool for use in routes
 module.exports = { pool };

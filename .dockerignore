@@ -1,0 +1,5 @@
+src/ai-service/cache/
+src/ai-service/models/
+node_modules/
+.git/
+.env

@@ -1,1 +1,24 @@
+# Environment variables (NEVER commit these)
 .env
+.env.*
+*.env
+
+# Dependencies
+node_modules/
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+
+# Firebase service account (if you ever use a JSON file locally)
+firebase-service-account.json
+*-service-account.json
