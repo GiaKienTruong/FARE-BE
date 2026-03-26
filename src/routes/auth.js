@@ -203,6 +203,66 @@ router.put('/profile', verifyToken, async (req, res) => {
     }
 });
 
+// POST /api/auth/send-otp - Generate and send OTP
+router.post('/send-otp', async (req, res) => {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email is required' });
+
+    const client = await pool.connect();
+    try {
+        // 1. Generate 5-digit OTP
+        const otp = Math.floor(10000 + Math.random() * 90000).toString();
+        const expiresAt = new Date(Date.now() + 10 * 60 * 1000); // 10 minutes
+
+        // 2. Save to database
+        await client.query(
+            'INSERT INTO otp_verifications (email, otp_code, expires_at) VALUES ($1, $2, $3)',
+            [email, otp, expiresAt]
+        );
+
+        // 3. Send Email
+        const { sendOTPEmail } = require('../services/emailService');
+        await sendOTPEmail(email, otp);
+
+        res.json({ message: 'OTP sent successfully' });
+    } catch (error) {
+        console.error('Send OTP error:', error);
+        res.status(500).json({ error: 'Failed to send OTP. Please check server logs.' });
+    } finally {
+        client.release();
+    }
+});
+
+// POST /api/auth/verify-otp - Verify OTP code
+router.post('/verify-otp', async (req, res) => {
+    const { email, otp } = req.body;
+    if (!email || !otp) return res.status(400).json({ error: 'Email and OTP are required' });
+
+    const client = await pool.connect();
+    try {
+        const result = await client.query(
+            `SELECT id FROM otp_verifications 
+             WHERE email = $1 AND otp_code = $2 AND verified = false AND expires_at > NOW()
+             ORDER BY created_at DESC LIMIT 1`,
+            [email, otp]
+        );
+
+        if (result.rows.length === 0) {
+            return res.status(400).json({ error: 'Invalid or expired OTP' });
+        }
+
+        // Mark as verified
+        await client.query('UPDATE otp_verifications SET verified = true WHERE id = $1', [result.rows[0].id]);
+
+        res.json({ message: 'OTP verified successfully', success: true });
+    } catch (error) {
+        console.error('Verify OTP error:', error);
+        res.status(500).json({ error: 'Verification failed' });
+    } finally {
+        client.release();
+    }
+});
+
 // Export middleware for use in other routes
 module.exports = router;
 module.exports.verifyToken = verifyToken;
