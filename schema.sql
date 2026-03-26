@@ -135,6 +135,16 @@ CREATE TABLE style_recommendations (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- OTP Verifications table
+CREATE TABLE otp_verifications (
+  id SERIAL PRIMARY KEY,
+  email VARCHAR(255) NOT NULL,
+  otp_code VARCHAR(10) NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  verified BOOLEAN DEFAULT false,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- User activity log
 CREATE TABLE activity_log (
   id SERIAL PRIMARY KEY,
