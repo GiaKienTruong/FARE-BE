@@ -37,22 +37,18 @@ router.post('/register', verifyToken, async (req, res) => {
 
         const firebaseUid = req.user.uid;
 
-        // Check if user already exists
-        const existingUser = await client.query(
-            'SELECT id FROM users WHERE firebase_uid = $1',
-            [firebaseUid]
-        );
-
-        if (existingUser.rows.length > 0) {
-            return res.status(400).json({ error: 'User already exists' });
-        }
-
-        // Insert new user
+        // Insert new user or update if exists
         const result = await client.query(
             `INSERT INTO users (
         firebase_uid, email, display_name, phone, 
         height, weight, gender, subscription_tier
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+      ON CONFLICT (firebase_uid) DO UPDATE SET
+        display_name = COALESCE(EXCLUDED.display_name, users.display_name),
+        phone = COALESCE(EXCLUDED.phone, users.phone),
+        height = COALESCE(EXCLUDED.height, users.height),
+        weight = COALESCE(EXCLUDED.weight, users.weight),
+        gender = COALESCE(EXCLUDED.gender, users.gender)
       RETURNING id, email, display_name, subscription_tier, created_at`,
             [firebaseUid, email, displayName, phone, height, weight, gender, 'free']
         );
@@ -64,7 +60,7 @@ router.post('/register', verifyToken, async (req, res) => {
 
     } catch (error) {
         console.error('Registration error:', error);
-        res.status(500).json({ error: 'Failed to register user' });
+        res.status(500).json({ error: 'Failed to register user: ' + error.message });
     } finally {
         client.release();
     }
@@ -90,8 +86,10 @@ router.post('/sync', verifyToken, async (req, res) => {
             userResult = await client.query(
                 `INSERT INTO users (firebase_uid, email, display_name, subscription_tier)
                  VALUES ($1, $2, $3, 'free')
+                 ON CONFLICT (firebase_uid) DO UPDATE SET
+                   email = EXCLUDED.email
                  RETURNING id, email, display_name, subscription_tier`,
-                [firebaseUid, email, displayName]
+                [firebaseUid, email || '', displayName || '']
             );
         }
 
@@ -102,7 +100,7 @@ router.post('/sync', verifyToken, async (req, res) => {
 
     } catch (error) {
         console.error('Auth sync error:', error);
-        res.status(500).json({ error: 'Failed to sync user profile' });
+        res.status(500).json({ error: 'Failed to sync user profile: ' + error.message });
     } finally {
         client.release();
     }
