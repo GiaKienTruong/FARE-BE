@@ -3,11 +3,17 @@ require('dotenv').config();
 
 // Create transporter
 const transporter = nodemailer.createTransport({
-    service: 'gmail', // or your preferred service
+    host: 'smtp.gmail.com',
+    port: 587, // Port 587 không bị block trên Render (free tier)
+    secure: false, // Dùng STARTTLS
+    requireTLS: true,
     auth: {
         user: process.env.EMAIL_USER,
         pass: process.env.EMAIL_PASS,
     },
+    tls: {
+        ciphers: 'SSLv3'
+    }
 });
 
 /**
